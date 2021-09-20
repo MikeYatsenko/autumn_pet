@@ -28,6 +28,11 @@ class Note(SQLAlchemyObjectType):
         interfaces = (graphene.relay.Node,)
 
 
+class ProtectedNote(graphene.Union):
+    class Meta:
+        types = (Note, AuthInfoField)
+
+
 class CreateUser(Mutation):
     class Arguments:
         username = graphene.String()
@@ -41,10 +46,7 @@ class CreateUser(Mutation):
         new_user = UserModel(
             username=username,
             email=email,
-            password=str(
-                bcrypt.generate_password_hash(password),
-                'utf-8'
-            ))
+            password=password)
         db.session.add(new_user)
         db.session.commit()
         ok = True
@@ -70,24 +72,22 @@ class AuthMutation(graphene.Mutation):
         )
 
 
-class CreateNote(Mutation):
+class CreateNote(graphene.Mutation):
+    note = graphene.Field(ProtectedNote)
+
     class Arguments:
-        title = graphene.String()
-        body = graphene.String()
+        title = graphene.String(required=True)
+        body = graphene.String(required=True)
+        user_id = graphene.Int(required=True)
         token = graphene.String()
 
-    note = graphene.Field(Note)
-
     @mutation_jwt_required
-    def mutate(root, info, title, body):
-        new_note = NoteModel(
-            title=title,
-            body=body,
-        )
-        db.session.add(new_note)
-        db.session.commit()
-
-        return CreateNote(note=new_note)
+    def mutate(self, info, title, user_id, body):
+        note = NoteModel(title=title, user_id=user_id, body=body)
+        if note:
+            db.session.add(note)
+            db.session.commit()
+        return CreateNote(note=note)
 
 
 class UpdateNote(Mutation):
@@ -95,6 +95,7 @@ class UpdateNote(Mutation):
         note_id = graphene.String()
         title = graphene.String()
         body = graphene.String()
+        token = graphene.String(required=True)
 
     ok = graphene.Boolean()
     note = graphene.Field(Note)
@@ -117,10 +118,12 @@ class UpdateNote(Mutation):
 
 class DeleteNote(Mutation):
     class Arguments:
-        note_id = graphene.String()
+        note_id = graphene.Int()
+        token = graphene.String()
 
     ok = graphene.Boolean()
     note = graphene.Field(Note)
+    token = graphene.String()
 
     @mutation_jwt_required
     def mutate(root, info, note_id):
@@ -146,11 +149,6 @@ class RefreshMutation(graphene.Mutation):
     def mutate(self):
         current_user = get_jwt_identity()
         return RefreshMutation(new_token=create_access_token(identity=current_user))
-
-
-class ProtectedNote(graphene.Union):
-    class Meta:
-        types = (Note, AuthInfoField)
 
 
 class AllMutations(graphene.ObjectType):
